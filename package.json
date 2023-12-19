@@ -1,0 +1,29 @@
+{
+  "name": "neural-network-from-scratch",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "vite-node src/index.ts",
+    "build": "tsc"
+  },
+  "engines": {
+    "node": "20.x"
+  },
+  "type": "module",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/d3-random": "^3.0.3",
+    "@types/ramda": "^0.29.9",
+    "typescript": "^5.3.3",
+    "vite-node": "^1.0.4"
+  },
+  "dependencies": {
+    "d3-random": "^3.0.1",
+    "mathjs": "^12.2.0",
+    "ramda": "^0.29.1"
+  }
+}
