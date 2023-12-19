@@ -95,7 +95,7 @@ const initialBiases: Biases = R.pipe(
 	R.map(({ size }) => Array.from({ length: size }, sampleStandardNormal)) // For each subsequent layer, create a 1-dimentional array with normally distributed random biases for each node
 )(LAYERS);
 
-// On every epoch, compute the cost gradients and decend
+// On every epoch, compute the cost gradients and descend
 const [finalWeights, finalBiases] = R.reduce(
 	([weights, biases]: [Weights, Biases], epoch): [Weights, Biases] => {
 		// Get a subset of the images for training (note that these aren't true epochs since we aren't using all of the training data each time)
