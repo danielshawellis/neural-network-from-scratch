@@ -1,13 +1,22 @@
 import * as R from 'ramda';
 import { randomNormal } from 'd3-random';
 
-// Define the hyper-parameters
-const LAYERS: readonly { size: number }[] = [{ size: 784 }, { size: 20 }, { size: 10 }];
-const LEARNING_RATE: number = 3;
-
 // Define types
 type Biases = number[][];
 type Weights = number[][][];
+type ImageData = { image: number[], label: number };
+
+// Define the hyper-parameters
+const LAYERS: readonly { size: number }[] = [{ size: 784 }, { size: 20 }, { size: 10 }];
+const LEARNING_RATE: number = 3;
+const EPOCHS: number = 5;
+const MINI_BATCH_SIZE: number = 10;
+const ADJUSTMENT_DISTANCE: number = 1; // Magnitude of adjustments made during experimental gradient estimation
+
+// Import the MNIST image dataset and split the training and test data
+import _mnistDataset from '../data/mnist-dataset.json';
+const mnistDataset = _mnistDataset as ImageData[];
+const [trainingData, testData] = R.splitAt(50_000, mnistDataset);
 
 // Define the activation (squishification) functions
 const sigmoid = (x: number) => 1 / (1 + (Math.E ** -x)); // Explanation: https://en.wikipedia.org/wiki/Sigmoid_function
@@ -37,6 +46,44 @@ const feedForward = (weights: Weights, biases: Biases, inputLayer: number[]) => 
 	return layerIndecies.reduce((previousLayerActivations, currentLayerIndex) => computeLayerActivations(weights, biases, currentLayerIndex, previousLayerActivations), inputLayer);
 };
 
+// Define the cost function (which measures the error for a given data point)
+const computeCost = (weights: Weights, biases: Biases, { image, label }: ImageData) => {
+	const predictedActivations = feedForward(weights, biases, image);
+	const actualActivations = Array.from({ length: 10 }, (_, index) => (index === label) ? 1 : 0);
+	const cost = R.pipe(
+		R.map(([predictedActivation, actualActivation]) => Math.abs(predictedActivation - actualActivation)), // Calculate the error for each prediction
+		R.sum // Sum up all of the prediction errors
+	)(R.zip(predictedActivations, actualActivations));
+	return cost;
+};
+const computeSumCost = (weights: Weights, biases: Biases, images: ImageData[]) => R.pipe(
+	R.map((image: ImageData) => computeCost(weights, biases, image)),
+	R.sum
+)(images);
+
+// Experimentally compute the cost gradients of the weights and biases for some specified images
+const computeCostGradients = (weights: Weights, biases: Biases, images: ImageData[], adjustmentDistance: number) => {
+	// Calculate the cost (error) of the current weights and biases
+	const currentCost = computeSumCost(weights, biases, images);
+
+	// Experimentally estimate the cost gradient for each of the weights
+	const weightsCostGradient = weights.map((x, layerPairIndex) => x.map((y, leftNodeIndex) => y.map((weight, rightNodeIndex) => {
+		const adjustedWeights = R.assocPath([layerPairIndex, leftNodeIndex, rightNodeIndex], weight + adjustmentDistance, weights);
+		const adjustedCost = computeSumCost(adjustedWeights, biases, images);
+		return (adjustedCost - currentCost) / adjustmentDistance;
+	})));
+
+	// Experimentally estimate the cost gradient for the biases on each node
+	const biasesCostGradient = biases.map((layerBiases, layerIndex) => layerBiases.map((bias, nodeIndex) => {
+		const adjustedBiases = R.assocPath([layerIndex, nodeIndex], bias + adjustmentDistance, biases);
+		const adjustedCost = computeSumCost(weights, adjustedBiases, images);
+		return (adjustedCost - currentCost) / adjustmentDistance;
+	}));
+
+	// Return both cost gradients
+	return { weightsCostGradient, biasesCostGradient };
+};
+
 // Randomly initialize the weights and biases
 const sampleStandardNormal = randomNormal(0, Math.sqrt(1)); // Generate random numbers that follow a normal (Gaussian) distribution with a mean of 0 and a variance of 1
 const initialWeights: Weights = R.pipe(
@@ -48,7 +95,35 @@ const initialBiases: Biases = R.pipe(
 	R.map(({ size }) => Array.from({ length: size }, sampleStandardNormal)) // For each subsequent layer, create a 1-dimentional array with normally distributed random biases for each node
 )(LAYERS);
 
-// TEMPORARY: Create a sample input and compute the output
-const input = Array.from({ length: LAYERS[0].size }, Math.random);
-const output = feedForward(initialWeights, initialBiases, input);
-console.log(output);
+// On every epoch, compute the cost gradients and decend
+const [finalWeights, finalBiases] = R.reduce(
+	([weights, biases]: [Weights, Biases], epoch): [Weights, Biases] => {
+		// Get a subset of the images for training (note that these aren't true epochs since we aren't using all of the training data each time)
+		const trainingDataRandomSubset = R.sort(() => Math.random() - 0.5, trainingData).slice(0, MINI_BATCH_SIZE);
+
+		// Calculate the cost (error) of the current weights and biases
+		const { weightsCostGradient, biasesCostGradient } = computeCostGradients(weights, biases, trainingDataRandomSubset, ADJUSTMENT_DISTANCE);
+
+		// Improve the weights and biases based on their cost gradient (nudge them in the right direction to reduce error)
+		const improvedWeights = weights.map((x, layerPairIndex) => x.map((y, leftNodeIndex) => y.map((weight, rightNodeIndex) => {
+			const weightCostGradient = weightsCostGradient[layerPairIndex][leftNodeIndex][rightNodeIndex];
+			return weight + (weightCostGradient * LEARNING_RATE);
+		})));
+		const improvedBiases = biases.map((layerBiases, layerIndex) => layerBiases.map((bias, nodeIndex) => {
+			const biasCostGradient = biasesCostGradient[layerIndex][nodeIndex];
+			return bias + (biasCostGradient * LEARNING_RATE);
+		}));
+
+		// Log the completion of the epoch
+		console.log(`Epoch ${epoch} Complete`);
+		
+		// Return the improved weights and biases
+		return [improvedWeights, improvedBiases];
+	},
+	[initialWeights, initialBiases] as [Weights, Biases],
+	Array.from({ length: EPOCHS }, (_, index) => index + 1)
+);
+
+// Compare the total error before and after training to determine whether the accuracy improved
+console.log("Initial Cost: ", computeSumCost(initialWeights, initialBiases, testData));
+console.log("Final Cost: ", computeSumCost(finalWeights, finalBiases, testData));
