@@ -24,16 +24,18 @@ const getLayerBiases = (layerIndex: number) => biases[layerIndex -1]; // Add an 
 const getWeightBetweenNodes = (currentLayerIndex: number, currentNodeIndex: number, previousNodeIndex: number) => weights[currentLayerIndex - 1][previousNodeIndex][currentNodeIndex]; // Add an offset since the adjacent layers are paired
 
 // Define how each subsequent layer's activations are computed
-const computeLayerActivations = (currentLayerIndex: number, previousLayerActivations: number[]) => {	
-	const currentLayerBiases = getLayerBiases(currentLayerIndex);
-	const activations = currentLayerBiases.map((currentNodeBias, currentNodeIndex) => {
+const computeLayerActivations = (currentLayerIndex: number, previousLayerActivations: number[]) => {
+	// Map over each node in this layer via the layer's biases array (it directly corresponds to the layer's nodes)
+	return getLayerBiases(currentLayerIndex).map((currentNodeBias, currentNodeIndex) => {
+		// Compute weighted inputs between this node and each node in the previous layer
 		const weightedInputs = previousLayerActivations.map((previousNodeActivation, previousNodeIndex) => {
 			const weightBetweenNodes = getWeightBetweenNodes(currentLayerIndex, currentNodeIndex, previousNodeIndex);
 			return (previousNodeActivation * weightBetweenNodes) + currentNodeBias;
-		})
+		});
+
+		// Sum up all of the weighted inputs and compress the product into a range between zero and one using the sigmoid activation function 
 		return sigmoid(R.sum(weightedInputs));
 	});
-	return activations;
 };
 
 // Define the feed forward process (to compute the output activations through the entire net)
