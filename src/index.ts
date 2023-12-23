@@ -1,5 +1,6 @@
 import * as R from 'ramda';
 import { randomNormal } from 'd3-random';
+import { loadLJSONLines } from './data-loader';
 
 // Define types
 type Biases = number[][];
@@ -12,11 +13,6 @@ const LEARNING_RATE: number = 3;
 const EPOCHS: number = 5;
 const MINI_BATCH_SIZE: number = 10;
 const ADJUSTMENT_DISTANCE: number = 1; // Magnitude of adjustments made during experimental gradient estimation
-
-// Import the MNIST image dataset and split the training and test data
-import _mnistDataset from '../data/mnist-dataset.json';
-const mnistDataset = _mnistDataset as ImageData[];
-const [trainingData, testData] = R.splitAt(50_000, mnistDataset);
 
 // Define the activation (squishification) functions
 const sigmoid = (x: number) => 1 / (1 + (Math.E ** -x)); // Explanation: https://en.wikipedia.org/wiki/Sigmoid_function
@@ -95,35 +91,50 @@ const initialBiases: Biases = R.pipe(
 	R.map(({ size }) => Array.from({ length: size }, sampleStandardNormal)) // For each subsequent layer, create a 1-dimentional array with normally distributed random biases for each node
 )(LAYERS);
 
-// On every epoch, compute the cost gradients and descend
-const [finalWeights, finalBiases] = R.reduce(
-	([weights, biases]: [Weights, Biases], epoch): [Weights, Biases] => {
-		// Get a subset of the images for training (note that these aren't true epochs since we aren't using all of the training data each time)
-		const trainingDataRandomSubset = R.sort(() => Math.random() - 0.5, trainingData).slice(0, MINI_BATCH_SIZE);
+(async () => {
+	// Keep track of the weights and biases
+	let weights = initialWeights;
+	let biases = initialBiases;
 
-		// Calculate the cost (error) of the current weights and biases
-		const { weightsCostGradient, biasesCostGradient } = computeCostGradients(weights, biases, trainingDataRandomSubset, ADJUSTMENT_DISTANCE);
+	// Get the line numbers (there are 60,000 entries in the LJSON file)
+	const lineNumbers = Array.from({ length: 60_000 }, (_, index) => index);
 
-		// Improve the weights and biases based on their cost gradient (nudge them in the right direction to reduce error)
-		const improvedWeights = weights.map((x, layerPairIndex) => x.map((y, leftNodeIndex) => y.map((weight, rightNodeIndex) => {
-			const weightCostGradient = weightsCostGradient[layerPairIndex][leftNodeIndex][rightNodeIndex];
-			return weight + (weightCostGradient * LEARNING_RATE);
-		})));
-		const improvedBiases = biases.map((layerBiases, layerIndex) => layerBiases.map((bias, nodeIndex) => {
-			const biasCostGradient = biasesCostGradient[layerIndex][nodeIndex];
-			return bias + (biasCostGradient * LEARNING_RATE);
-		}));
+	// Work through each epoch consecutively
+	for (let epoch = 1; epoch <= EPOCHS; epoch++) {
+		// Get the randomly sorted mini batches for this epoch
+		const miniBatches = R.splitEvery(MINI_BATCH_SIZE, lineNumbers.sort(() => Math.random() - 0.5));
+
+		// Loop through each mini batch in this epoch
+		for (const miniBatchLineNumbers of miniBatches) {
+			// Load the lines from the LJSON file
+			const images = await loadLJSONLines<ImageData>('./data/mnist-dataset.json', miniBatchLineNumbers);
+
+			// Calculate the cost (error) of the current weights and biases
+			const { weightsCostGradient, biasesCostGradient } = computeCostGradients(weights, biases, images, ADJUSTMENT_DISTANCE);
+
+			// Improve the weights and biases based on their cost gradient (nudge them in the right direction to reduce error)
+			const improvedWeights = weights.map((x, layerPairIndex) => x.map((y, leftNodeIndex) => y.map((weight, rightNodeIndex) => {
+				const weightCostGradient = weightsCostGradient[layerPairIndex][leftNodeIndex][rightNodeIndex];
+				return weight + (weightCostGradient * LEARNING_RATE);
+			})));
+			const improvedBiases = biases.map((layerBiases, layerIndex) => layerBiases.map((bias, nodeIndex) => {
+				const biasCostGradient = biasesCostGradient[layerIndex][nodeIndex];
+				return bias + (biasCostGradient * LEARNING_RATE);
+			}));
+
+			// Update the weights and biases
+			weights = improvedWeights;
+			biases = improvedBiases;
+		};
 
 		// Log the completion of the epoch
 		console.log(`Epoch ${epoch} Complete`);
-		
-		// Return the improved weights and biases
-		return [improvedWeights, improvedBiases];
-	},
-	[initialWeights, initialBiases] as [Weights, Biases],
-	Array.from({ length: EPOCHS }, (_, index) => index + 1)
-);
+	};
 
-// Compare the total error before and after training to determine whether the accuracy improved
-console.log("Initial Cost: ", computeSumCost(initialWeights, initialBiases, testData));
-console.log("Final Cost: ", computeSumCost(finalWeights, finalBiases, testData));
+	// Load a random subset and compare the total error before and after training to determine whether the accuracy improved
+	const randomSubsetLineNumbers = Array.from({ length: 60_000 }, (_, index) => index).sort(() => Math.random() - 0.5).slice(0, 1000);
+	loadLJSONLines<ImageData>('./data/mnist-dataset.json', randomSubsetLineNumbers).then(images => {
+		console.log("Initial Cost: ", computeSumCost(initialWeights, initialBiases, images));
+		console.log("Final Cost: ", computeSumCost(weights, biases, images));
+	});
+})();
